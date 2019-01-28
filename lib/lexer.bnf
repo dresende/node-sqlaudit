@@ -1,0 +1,305 @@
+{
+	const { async, resolve, Query_SQL } = options.tools;
+
+	const stats = {
+		start      : 0,
+		end        : 0,
+		statements : 0,
+		errors     : 0,
+	};
+}
+
+Code = head:Block tail:(NL Block)* {
+	return (context, next) => {
+		let blocks  = tail.reduce((list, el) => ([ el[1], ...list ]), [ head ]).reverse();
+
+		stats.start = Date.now();
+
+		async.eachSeries(blocks, (block, next) => {
+			block(context, next);
+		}, (err) => {
+			if (err) return next(err);
+
+			stats.end = Date.now();
+
+			return next(null, stats);
+		});
+	}
+}
+
+Block = Comment
+      / ForEach
+      / If
+      / Statement
+
+Comment = "//" [^\r\n]* {
+	return (context, next) => {
+		return next(null, true);
+	};
+}
+
+ForEach = "for " _ Expression _ "{" _ "}" {
+	return (context, next) => {
+		// useless empty
+		return next();
+	};
+} / "for " _ expr:Expression _ "{" _ head:Block tail:(NL Block)* _ "}" {
+	return (context, next) => {
+		expr(context, (err, results) => {
+			if (err) return next(err);
+
+			let statements = tail.reduce((list, el) => ([ el[1], ...list ]), [ head ]).reverse();
+
+			async.eachSeries(results, (result, next) => {
+				async.eachSeries(statements, (statement, next) => {
+					stats.statements += 1;
+
+					statement(result, (err, ok) => {
+						if (err) return next(err);
+						if (ok) return next();
+
+						stats.errors += 1;
+
+						return next();
+					});
+				}, next);
+			}, next);
+		});
+	};
+}
+
+If = "if " _ Statement _ "{" _ "}" {
+	return (context, next) => {
+		// useless empty
+		return next();
+	};
+} / "if " _ ifstatement:Statement _ "{" _ head:Block tail:(NL Block)* _ "}" {
+	return (context, next) => {
+		ifstatement(context, (err, ok) => {
+			if (err) return next(err);
+			if (!ok) return next();
+
+			let statements = tail.reduce((list, el) => ([ el[1], ...list ]), [ head ]).reverse();
+
+			async.eachSeries(statements, (statement, next) => {
+				stats.statements += 1;
+
+				statement(context, (err, ok) => {
+					if (err) return next(err);
+					if (ok) return next();
+
+					stats.errors += 1;
+
+					return next();
+				});
+			}, next);
+		});
+	};
+}
+
+Statement = left:Expression _ op:CompareOperator _ right:Expression {
+	return (context, next) => {
+		right(context, (err, right_value) => {
+			if (err) return next(err);
+
+			left(context, (err, left_value) => {
+				if (err) return next(err);
+
+				if (options.debug) {
+					options.debug("statement: " + left_value + " " + op + " " + right_value);
+				}
+
+				switch (op) {
+					case  "=": return next(null, left_value == right_value);
+					case  ">": return next(null, left_value > right_value);
+					case  "<": return next(null, left_value < right_value);
+					case "!=": return next(null, left_value != right_value);
+					case ">=": return next(null, left_value >= right_value);
+					case "<=": return next(null, left_value <= right_value);
+				}
+
+				return next(null, false);
+			});
+		});
+	}
+}
+
+Expression = head:Term tail:(_ ("+" / "-") _ Term)* {
+	return (context, next) => {
+		resolve(context, head, (err, value) => {
+			if (err) return next(err);
+
+			async.reduce(tail, value, (result, element, next) => {
+				resolve(context, element[3], (err, value) => {
+					if (err) return next(err);
+
+					return next(null, element[1] == "+" ? result + value : result - value);
+				});
+			}, next);
+		});
+	};
+}
+
+Term = head:Factor tail:(_ ("*" / "/") _ Factor)* {
+	return (context, next) => {
+		resolve(context, head, (err, value) => {
+			if (err) return next(err);
+
+			async.reduce(tail, value, (result, element, next) => {
+				resolve(context, element[3], (err, value) => {
+					if (err) return next(err);
+
+					return next(null, element[1] == "*" ? result * value : result / value);
+				});
+			}, next);
+		});
+	};
+}
+
+Factor = "(" _ expr:Expression _ ")" { return expr }
+	   / String
+	   / Number
+	   / Null
+	   / QuerySQL
+
+QuerySQL = table:Identifier where:QueryWhere? filter:QueryFilter* agg:QueryAggregator? prop:QueryProperty? {
+	return (context, next) => {
+		let from = table();
+
+		if (context && typeof context[from] != "undefined" && !where && !agg) {
+			// this is actually and identifier
+			return next(null, context[from]);
+		}
+
+		let q = new Query_SQL(from);
+
+		if (agg) {
+			agg(context, q);
+		}
+
+		if (prop) {
+			prop(context, q);
+		}
+
+		async.eachSeries(filter || [], (filter, next) => {
+			filter(context, q, next);
+		}, (err) => {
+			async.eachSeries(where || [], (cond, next) => {
+				cond(context, q, next);
+			}, (err) => {
+				if (err) return next(err);
+
+				if (options.debug) {
+					options.debug("sql: " + q.build());
+				}
+
+				q.query(options.db, next);
+			});
+		});
+	}
+}
+QueryWhere = "[" _ head:QueryCondition tail:(_ "," _ QueryCondition)* _ "]" {
+	return [ head, ...tail.map((element) => (element[3])) ]
+}
+QueryCondition = prop:Identifier _ op:CompareOperator _ val:Factor {
+	return (context, query, next) => {
+		val(context, (err, value) => {
+			if (err) return next(err);
+
+			if (value === null) {
+				switch (op) {
+					case  "=":
+						query.where(`${query.escapeId(prop())} IS NULL`);
+
+						return next();
+					case "!=":
+						query.where(`${query.escapeId(prop())} IS NOT NULL`);
+
+						return next();
+				}
+			}
+
+			query.where(`${query.escapeId(prop())} ${op} ${query.escapeValue(value)}`);
+
+			return next();
+		});
+	};
+}
+QueryAggregator = "." agg:Identifier "(" prop:Identifier? ")" {
+	return (context, query) => {
+		query.type("one");
+		query.select(`${agg().toUpperCase()}(${prop ? query.escapeId(prop()) : "*"})`);
+	};
+}
+QueryFilter = ":order(" _ head:Identifier tail:(_ "," _ Identifier)* _ ")" {
+	return (context, query, next) => {
+		let args = tail.reduce((list, el) => ([ el[3](context), ...list ]), [ head(context) ]).reverse();
+
+		query.order(...args);
+
+		return next();
+	};
+} / ":limit(" _ n:Number _ ")" {
+	return (context, query, next) => {
+		n(context, (err, lim) => {
+			if (err) return next(err);
+
+			query.limit(0, lim);
+
+			return next();
+		});
+	};
+} / ":first()" {
+	return (context, query, next) => {
+		query.limit(0, 1);
+		query.type("row");
+
+		return next();
+	};
+}
+QueryProperty = "." prop:Identifier {
+	return (context, query) => {
+		query.prop(prop());
+	};
+}
+
+CompareOperator = "=" / "!=" / ">=" / ">" / "<=" / "<"
+
+Identifier = [a-z-][a-z0-9_-]* {
+	let id = text();
+
+	return () => {
+		return id;
+	};
+}
+
+String   = "\"" content:[^"]* "\"" {
+	let str = content.join("");
+
+	return (context, next) => {
+		return next(null, str);
+	};
+}
+
+Number = "0x" part:[0-9a-fA-F]+ {
+	let num = parseInt(part, 16)
+
+	return (context, next) => {
+		return next(null, num);
+	};
+} / [0-9]+ {
+	let num = parseInt(text(), 10)
+
+	return (context, next) => {
+		return next(null, num);
+	};
+}
+
+Null = "null" {
+	return (context, next) => {
+		return next(null, null);
+	};
+}
+
+_  = Comment? [ \t\n\r]*
+NL = [ \t]*[\r\n]+[ \t]*
