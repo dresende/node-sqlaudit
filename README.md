@@ -3,6 +3,22 @@
 This is a module that accepts a specific language that you can use to simplify
 auditing of SQL data.
 
+## Example
+
+```js
+const sqlaudit = require("sqlaudit");
+const audit    = new sqlaudit({
+	db : "mysql://user:password@host/database",
+});
+
+// there's also an audit.runFile(filename, next)
+audit.runCode("./test.txt", (err, result) => {
+	if (err) throw err;
+
+	console.log(result);
+});
+```
+
 ## Language
 
 ### Query
