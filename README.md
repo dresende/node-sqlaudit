@@ -15,6 +15,7 @@ const audit    = new sqlaudit({
 audit.runCode(`
 	for users[age < 18] {
 		// users under age must have no logins
+		total_logins = 0
 		total_logins = user_logins[user_id = id].count()
 	}
 `, (err, result) => {
