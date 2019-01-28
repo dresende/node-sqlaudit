@@ -245,6 +245,7 @@ QueryFilter = ":order(" _ head:Identifier tail:(_ "," _ Identifier)* _ ")" {
 			if (err) return next(err);
 
 			query.limit(0, lim);
+			query.type("row");
 
 			return next();
 		});
