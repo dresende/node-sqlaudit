@@ -12,7 +12,12 @@ const audit    = new sqlaudit({
 });
 
 // there's also an audit.runFile(filename, next)
-audit.runCode("./test.txt", (err, result) => {
+audit.runCode(`
+	for users[age < 18] {
+		// users under age must have no logins
+		total_logins = user_logins[user_id = id].count()
+	}
+`, (err, result) => {
 	if (err) throw err;
 
 	console.log(result);
