@@ -1,11 +1,11 @@
 {
-	"name"         : "sqlaudit",
-	"version"      : "0.0.1",
-	"main"         : "./lib/sqlaudit",
-	"dependencies" : {
-		"pegjs" : "0.10.0",
-		"mysql" : "2.16.0",
-		"async" : "2.6.1",
-		"debug" : "4.1.1"
+	"name": "sqlaudit",
+	"version": "0.0.1",
+	"main": "./lib/sqlaudit",
+	"dependencies": {
+		"pegjs": "0.10.0",
+		"mysql": "2.16.0",
+		"async": "2.6.2",
+		"debug": "4.1.1"
 	}
 }
