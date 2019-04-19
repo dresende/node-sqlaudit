@@ -4,7 +4,7 @@
 	"main": "./lib/sqlaudit",
 	"dependencies": {
 		"pegjs": "0.10.0",
-		"mysql": "2.16.0",
+		"mysql": "2.17.1",
 		"async": "2.6.2",
 		"debug": "4.1.1"
 	}
