@@ -2,10 +2,11 @@
 	const { async, resolve, Query_SQL } = options.tools;
 
 	const stats = {
-		start      : 0,
-		end        : 0,
-		statements : 0,
-		errors     : 0,
+		start        : 0,
+		end          : 0,
+		statements   : 0,
+		errors       : 0,
+		query_errors : [],
 	};
 }
 
@@ -59,6 +60,7 @@ ForEach = "for " _ Expression _ "{" _ "}" {
 						if (ok) return next();
 
 						stats.errors += 1;
+						stats.query_errors.push(result);
 
 						return next();
 					});
@@ -89,6 +91,7 @@ If = "if " _ Statement _ "{" _ "}" {
 					if (ok) return next();
 
 					stats.errors += 1;
+					stats.query_errors.push(context);
 
 					return next();
 				});
